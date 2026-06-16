@@ -595,7 +595,7 @@ class SimpleTransformerModel(nn.Module):
         dropout: float = 0.0,
         tropical: bool = False,
         tropical_attention_cls=None,
-        pool: bool = False,
+        pool: bool = True,
         pre_norm: bool = False,
         aggregator: str = 'softmax',
     ):

@@ -5,14 +5,16 @@ from scipy.stats import qmc
 import torch.optim as optim
 import h5py
 import os
+import json
 from models import *
 from datasets import *
 
 rng = np.random.default_rng(42)
 d = 10
 
-x_full = qmc.LatinHypercube(d=d, rng=rng).random(2048) * 16 - 8
-ground_truth = topksubset(3)
+x_full = qmc.LatinHypercube(d=d, rng=rng).random(2048) * 16 - 8 # [B, d]
+x_full = np.expand_dims(x_full, -1) # [B, d, 1]
+ground_truth = topksubset(3, dim=1)
 y_full = ground_truth(torch.from_numpy(x_full).float())  # [B, 1]
 
 # 50/50 train/test split
@@ -21,13 +23,13 @@ y_train = y_full[:1024]
 x_test = torch.from_numpy(x_full[1024:]).float()
 y_test = y_full[1024:]
 
-model = MLP(input_dim=d)
+model = SimpleTransformerModel(input_dim=1)
 
 optimizer = optim.AdamW(model.parameters(), lr=0.001)
 criterion = nn.MSELoss()
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.5)
 
-epochs = 500
+epochs = 1000
 train_loss_history = []
 test_loss_history = []
 test_y_preds = []
@@ -65,8 +67,26 @@ print(f"\nTraining complete!")
 print(f"Final Train Loss: {train_loss_history[-1]:.6f}")
 print(f"Final Test Loss: {test_loss_history[-1]:.6f}")
 
+# Save the trained model
+os.makedirs('out', exist_ok=True)
+model_filename = 'out/model.pt'
+torch.save(model.state_dict(), model_filename)
+print(f"\nModel saved to '{model_filename}'")
+
+# Save the ground truth function metadata
+# Since the ground_truth is a lambda from topksubset(3, dim=1), we save its configuration
+ground_truth_config = {
+    'function_type': 'topksubset',
+    'k': 3,
+    'dim': 1
+}
+gt_config_filename = 'out/ground_truth_config.json'
+with open(gt_config_filename, 'w') as f:
+    json.dump(ground_truth_config, f, indent=2)
+print(f"Ground truth function config saved to '{gt_config_filename}'")
+
 # Save all metrics and predictions to HDF5
-h5_filename = 'out/training_data.h5'
+h5_filename = 'out/attn_training_data.h5'
 
 with h5py.File(h5_filename, 'w') as hf:
     # Create groups for organization
@@ -103,6 +123,11 @@ with h5py.File(h5_filename, 'w') as hf:
     metadata_group.attrs['final_test_loss'] = test_loss_history[-1]
     metadata_group.attrs['input_dim'] = x_train.shape[1]
 
+    # Save ground truth function info
+    metadata_group.attrs['ground_truth_func'] = 'topksubset'
+    metadata_group.attrs['ground_truth_k'] = 3
+    metadata_group.attrs['ground_truth_dim'] = 1
+
     # Save epoch numbers
     metadata_group.create_dataset('captured_epochs', data=np.array(captured_epochs))
 
@@ -122,6 +147,7 @@ print(f"  │   ├── predictions (shape: {test_preds_array.shape})")
 print(f"  │   ├── hidden_states (shape: {test_hidden_array.shape})")
 print(f"  │   ├── x_test (shape: {x_test.numpy().shape})")
 print(f"  │   └── y_test (shape: {y_test.numpy().shape})")
+print(f"  ├── function (ground_truth) - topksubset(3, dim=1)")
 print(f"  └── metadata/")
 print(f"      ├── epochs: {epochs}")
 print(f"      ├── n_train_samples: {len(x_train)}")
@@ -130,5 +156,11 @@ print(f"      ├── hidden_dim: {test_hidden_array.shape[2]}")
 print(f"      ├── input_dim: {x_train.shape[1]}")
 print(f"      ├── final_train_loss: {train_loss_history[-1]:.6f}")
 print(f"      ├── final_test_loss: {test_loss_history[-1]:.6f}")
+print(f"      ├── ground_truth_func: topksubset")
+print(f"      ├── ground_truth_k: 3")
+print(f"      ├── ground_truth_dim: 1")
 print(f"      └── captured_epochs (shape: {np.array(captured_epochs).shape})")
 print("="*60)
+print(f"\nAdditional files saved:")
+print(f"  - {model_filename} (model weights)")
+print(f"  - {gt_config_filename} (ground truth function config)")
