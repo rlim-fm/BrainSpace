@@ -10,4 +10,11 @@ def trop_poly(deg, dim, coeffs):
 
 
 def topksubset(k, dim=-1):
+    """
+    A function that takes a tensor x and returns the sum of the top-k elements along the specified dimension.
+
+    Args:
+        k: number of top elements to sum
+        dim: dimension along which to compute the top-k sum (default: -1)
+    """
     return lambda x: torch.sum(torch.topk(x, k, dim=dim).values, dim=dim)

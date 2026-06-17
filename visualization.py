@@ -17,24 +17,34 @@ import h5py
 import os
 
 
-class ParameterizedLine:
+class ParameterizedCurve:
     """
-    Represents a parameterized 1D line in input space.
+    Represents a parameterized 1D curve in input space.
     Maps a scalar parameter t to a point in d-dimensional space.
     """
-    def __init__(self, start: np.ndarray, direction: np.ndarray):
+    def __init__(self, function: Callable[[np.ndarray], np.ndarray]):
         """
         Args:
-            start: starting point in d-dimensional space
-            direction: direction vector in d-dimensional space
+            function: a callable that takes a scalar or array of t values and returns corresponding points in d-dimensional space
         """
-        self.start = np.asarray(start, dtype=float)
-        self.direction = np.asarray(direction, dtype=float)
+        self.function = function
 
-        if self.start.shape != self.direction.shape:
-            raise ValueError(f"start and direction must have same shape, got {self.start.shape} vs {self.direction.shape}")
 
-        self.input_dim = len(self.start)
+    @staticmethod
+    def axis_curve(input_dim, axis) -> ParameterizedCurve:
+        """
+        Create a line aligned with a single axis (e.g., varying along x_1).
+
+        Args:
+            input_dim: total dimensionality
+            axis: which axis to vary (0-indexed)
+
+        Returns:
+            ParameterizedCurve varying along the specified axis
+        """
+        func = lambda t: np.eye(input_dim, 1)[axis] * t
+        return ParameterizedCurve(func)
+
 
     def __call__(self, t: np.ndarray) -> np.ndarray:
         """
@@ -47,35 +57,22 @@ class ParameterizedLine:
             Point(s) in d-dimensional space: start + t * direction
         """
         t = np.asarray(t)
-        if t.ndim == 0:  # scalar
-            return self.start + t * self.direction
-        else:  # array
-            return self.start + t[:, np.newaxis] * self.direction
+        return self.function(t)
 
-    @staticmethod
-    def axis_aligned(input_dim: int, axis: int, base: Optional[np.ndarray] = None) -> "ParameterizedLine":
+
+    def generate_curve(self, t_range: Tuple[float, float], n_points: int) -> np.ndarray:
         """
-        Create a line aligned with a single axis (e.g., varying along x_1).
+        Generate points along the line for visualization.
 
         Args:
-            input_dim: total dimensionality
-            axis: which axis to vary (0-indexed)
-            base: base point for other dimensions (default: zeros)
+            t_range: (t_min, t_max) range of parameter values
+            n_points: number of points to generate
 
         Returns:
-            ParameterizedLine varying along the specified axis
+            Array of shape (n_points, input_dim) with points along the line
         """
-        if base is None:
-            start = np.zeros(input_dim)
-        else:
-            start = np.asarray(base)
-            if len(start) != input_dim:
-                raise ValueError(f"base dimension {len(start)} doesn't match input_dim {input_dim}")
-
-        direction = np.zeros(input_dim)
-        direction[axis] = 1.0
-        return ParameterizedLine(start, direction)
-
+        t_values = np.linspace(t_range[0], t_range[1], n_points)
+        return self(t_values)
 
 class Visualizer:
     def __init__(self):
@@ -121,15 +118,15 @@ class Visualizer:
         return extract_1d_slice(**self.data)
 
     def create_1d_animation(self,
-                           line: Optional[ParameterizedLine] = None,
-                           t_range: Optional[Tuple[float, float]] = None,
-                           output_path: str = '1d_convergence.gif'):
+                            line: Optional[ParameterizedCurve] = None,
+                            t_range: Optional[Tuple[float, float]] = None,
+                            output_path: str = '1d_convergence.gif'):
         """
         Create animation showing 1D functional convergence along a parameterized line.
 
         Args:
-            line: ParameterizedLine object. If None, defaults to varying the first input dimension.
-            t_range: (t_min, t_max) parameter range. If None, defaults to data range on first axis.
+            line: ParameterizedCurve object. If None, defaults to varying the first input dimension.
+            t_range: (t_min, t_max) parameter x_range. If None, defaults to data x_range on first axis.
             output_path: where to save the GIF
 
         Returns:
@@ -144,9 +141,9 @@ class Visualizer:
         # Default line: vary along first input dimension only
         if line is None:
             base = np.mean(x_test, axis=0)
-            line = ParameterizedLine.axis_aligned(input_dim, axis=0, base=base)
+            line = ParameterizedCurve.axis_curve(input_dim, axis=0)
 
-        # Default parameter range: match data range
+        # Default parameter x_range: match data x_range
         if t_range is None:
             t_range = (np.min(x_test[:, 0]), np.max(x_test[:, 0]))
 
@@ -415,7 +412,7 @@ def main():
     print("\nCreating 1D convergence animation...")
     visualizer.create_1d_animation(
         line=None,  # Uses default: axis-aligned along x_1
-        t_range=None,  # Uses data range
+        t_range=None,  # Uses data x_range
         output_path='visualizations/topk-sum/1d_convergence.gif'
     )
 

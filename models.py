@@ -7,7 +7,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class MLP(nn.Module):
+
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.output_layer = None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        pass
+
+class MLP(Model):
     """Simple fully-connected MLP for regression.
 
     Args:
@@ -584,7 +593,7 @@ class TransformerEncoder(nn.Module):
             x = self.last_norm(x)
         return x
 
-class SimpleTransformerModel(nn.Module):
+class SimpleTransformerModel(Model):
     def __init__(
         self,
         input_dim: int = 1,

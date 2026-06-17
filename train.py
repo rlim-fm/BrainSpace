@@ -1,3 +1,6 @@
+import warnings
+from typing import Optional
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -6,132 +9,187 @@ import torch.optim as optim
 import h5py
 import os
 import json
+
+from tqdm import trange
+
 from models import *
 from datasets import *
+from visualization import *
+
 
 rng = np.random.default_rng(42)
 d = 10
 
-x_full = qmc.LatinHypercube(d=d, rng=rng).random(2048) * 16 - 8 # [B, d]
-x_full = np.expand_dims(x_full, -1) # [B, d, 1]
-ground_truth = topksubset(3, dim=1)
-y_full = ground_truth(torch.from_numpy(x_full).float())  # [B, 1]
-
-# 50/50 train/test split
-x_train = torch.from_numpy(x_full[:1024]).float()
-y_train = y_full[:1024]
-x_test = torch.from_numpy(x_full[1024:]).float()
-y_test = y_full[1024:]
-
-model = SimpleTransformerModel(input_dim=1)
-
-optimizer = optim.AdamW(model.parameters(), lr=0.001)
-criterion = nn.MSELoss()
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.5)
-
-epochs = 1000
-train_loss_history = []
-test_loss_history = []
-test_y_preds = []
-test_hidden_states = []
-captured_epochs = []
-
-for epoch in range(epochs):
-    # Training step
-    optimizer.zero_grad()
-    hidden_train = model(x_train)
-    out_train = model.output_layer(hidden_train)
-    train_loss = criterion(out_train, y_train)
-    train_loss.backward()
-    optimizer.step()
-    scheduler.step()
-
-    # Evaluation step on test set
-    with torch.no_grad():
-        hidden_test = model(x_test)
-        out_test = model.output_layer(hidden_test).squeeze()
-        test_loss = criterion(out_test, y_test)
-
-    # Record metrics
-    train_loss_history.append(train_loss.item())
-    test_loss_history.append(test_loss.item())
-    test_y_preds.append(out_test.detach().cpu().numpy())
-    test_hidden_states.append(hidden_test.detach().cpu().numpy())
-    captured_epochs.append(epoch)
-
-    # Progress logging
-    if (epoch + 1) % 50 == 0:
-        print(f"Epoch {epoch + 1}/{epochs} | Train Loss: {train_loss.item():.6f} | Test Loss: {test_loss.item():.6f}")
-
-print(f"\nTraining complete!")
-print(f"Final Train Loss: {train_loss_history[-1]:.6f}")
-print(f"Final Test Loss: {test_loss_history[-1]:.6f}")
-
-# Save the trained model
-os.makedirs('out', exist_ok=True)
-model_filename = 'out/model.pt'
-torch.save(model.state_dict(), model_filename)
-print(f"\nModel saved to '{model_filename}'")
-
-# Save the ground truth function metadata
-# Since the ground_truth is a lambda from topksubset(3, dim=1), we save its configuration
-ground_truth_config = {
-    'function_type': 'topksubset',
-    'k': 3,
-    'dim': 1
+DATA_SETTINGS = {
+    "x_range": (-8, 8),
+    "data_dim": (10, 1),
+    "N": 2048,
+    "ground_truth": topksubset(3, 1),
 }
-gt_config_filename = 'out/ground_truth_config.json'
-with open(gt_config_filename, 'w') as f:
-    json.dump(ground_truth_config, f, indent=2)
-print(f"Ground truth function config saved to '{gt_config_filename}'")
 
-# Save all metrics and predictions to HDF5
-h5_filename = 'out/attn_training_data.h5'
+MODEL = SimpleTransformerModel(input_dim=1)
 
-with h5py.File(h5_filename, 'w') as hf:
-    # Create groups for organization
-    training_group = hf.create_group('training')
-    test_group = hf.create_group('test')
-    metadata_group = hf.create_group('metadata')
+OPTIMIZER = optim.AdamW(MODEL.parameters(), lr=0.001)
+CRITERION = nn.MSELoss()
+SCHEDULER = optim.lr_scheduler.StepLR(OPTIMIZER, step_size=100, gamma=0.5)
 
-    # Save loss histories
-    training_group.create_dataset('train_loss', data=np.array(train_loss_history))
-    training_group.create_dataset('test_loss', data=np.array(test_loss_history))
+EPOCHS = 1000
 
-    # Save test predictions (shape: [epochs, n_test_samples, 1])
-    test_preds_array = np.array(test_y_preds)
-    test_group.create_dataset('predictions', data=test_preds_array)
+class Processor:
+    def __init__(self,
+                 x_range=(-8, 8),
+                 data_dim = (10, 1),
+                 N=2048,
+                 ground_truth=topksubset(3, 1),
+                 model=MLP(input_dim=10),
+                 epochs=1000,
+                 criterion=nn.MSELoss(),
+                 optimizer=None,
+                 scheduler=None,
+                 *,
+                 seed: Optional[int] = None,
+                 dtype=torch.float32):
+        self._set_environment(seed=seed, dtype=dtype)
 
-    # Save test hidden states (shape: [epochs, n_test_samples, hidden_dim])
-    test_hidden_array = np.array(test_hidden_states)
-    test_group.create_dataset('hidden_states', data=test_hidden_array)
+        self.x_range = x_range
+        x_train = qmc.LatinHypercube(d=math.prod(data_dim), rng=rng).random(x_num).reshape(data_dim)
 
-    # Save test inputs and targets
-    test_group.create_dataset('x_test', data=x_test.numpy())
-    test_group.create_dataset('y_test', data=y_test.numpy())
+        # Data setup
+        self.x_train = x_train * (x_range[1] - x_range[0]) + x_range[0] # adjust range
+        self.y_train = ground_truth(torch.from_numpy(self.x_train).float())
+        self.x_test = x_train * 2 # double x_range for test set
+        self.y_test = ground_truth(torch.from_numpy(self.x_test).float())
 
-    # Save train inputs and targets
-    training_group.create_dataset('x_train', data=x_train.numpy())
-    training_group.create_dataset('y_train', data=y_train.numpy())
+        # Training
+        self.model = model.to(self.device, dtype=dtype)
+        self.criterion = criterion
 
-    # Save metadata
-    metadata_group.attrs['epochs'] = epochs
-    metadata_group.attrs['n_train_samples'] = len(x_train)
-    metadata_group.attrs['n_test_samples'] = len(x_test)
-    metadata_group.attrs['hidden_dim'] = test_hidden_array.shape[2]
-    metadata_group.attrs['final_train_loss'] = train_loss_history[-1]
-    metadata_group.attrs['final_test_loss'] = test_loss_history[-1]
-    metadata_group.attrs['input_dim'] = x_train.shape[1]
+        if optimizer:
+            self.optimizer = optimizer.to(self.device, dtype=dtype)
+        else:
+            self.optimizer = optim.AdamW(self.model.parameters(), lr=0.001)
+        if scheduler:
+            self.scheduler = scheduler.to(self.device, dtype=dtype)
+        else:
+            self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.5)
+        self.epochs = epochs
+        # Record metrics
 
-    # Save ground truth function info
-    metadata_group.attrs['ground_truth_func'] = 'topksubset'
-    metadata_group.attrs['ground_truth_k'] = 3
-    metadata_group.attrs['ground_truth_dim'] = 1
+        # Logging
+        self.logs = {
+            "train_loss": [],
+            "test_loss": [],
+            "y_test_preds": [],
+            "hidden_states": [],
+        }
+        self.metadata = {
+            "x_range": x_range,
+            "data_dim": data_dim,
+            "N": N,
+            "ground_truth_fn": ground_truth_fn.__name__,
+            "model": model.__class__.__name__,
+            "optimizer": optimizer.__class__.__name__,
+            "criterion": criterion.__class__.__name__,
+            "scheduler": scheduler.__class__.__name__,
+            "epochs": epochs,
+        }
 
-    # Save epoch numbers
-    metadata_group.create_dataset('captured_epochs', data=np.array(captured_epochs))
+    def train_epoch(self):
+        self.model.train()
+        self.optimizer.zero_grad()
+        hidden_train = self.model(self.x_train)
+        out_train = self.model.output_layer(hidden_train)
+        train_loss = self.criterion(out_train, self.y_train)
+        self.logs['train_loss'].append(train_loss.item())
+        train_loss.backward()
+        self.optimizer.step()
+        if self.scheduler:
+            self.scheduler.step()
 
-print(f"\nTraining data saved to '{h5_filename}'")
+    def test_epoch(self):
+        self.model.eval()
+        with torch.no_grad():
+            hidden_test = self.model(self.x_test)
+            out_test = self.model.output_layer(hidden_test).squeeze()
+            test_loss = self.criterion(out_test, self.y_test)
+            self.logs['test_loss'].append(test_loss.item())
+            self.logs['y_test_preds'].append(out_test.cpu().numpy())
+            self.logs['hidden_states'].append(hidden_test.cpu().numpy())
+
+
+    def run(self):
+        for _ in trange(self.epochs, desc="Training"):
+            self.train_epoch()
+            self.test_epoch()
+            if self.scheduler:
+                self.scheduler.step()
+
+        print(f"\nTraining complete!")
+        print(f"Final losses: Train Loss: {self.logs['train_loss'][-1]:.6f}, Test Loss: {self.logs['test_loss'][-1]:.6f}")
+
+    def save(self, filename):
+        with h5py.File(filename, 'w') as hf:
+            # Create groups for organization
+            training_group = hf.create_group('training')
+            test_group = hf.create_group('test')
+            metadata_group = hf.create_group('metadata')
+
+            # Save loss histories
+            training_group.create_dataset('train_loss', data=np.array(self.logs['train_loss']))
+            training_group.create_dataset('test_loss', data=np.array(self.logs['test_loss']))
+
+            # Save test predictions (shape: [epochs, n_test_samples, 1])
+            test_preds_array = np.array(self.logs['y_test_preds'])
+            test_group.create_dataset('predictions', data=test_preds_array)
+
+            # Save test hidden states (shape: [epochs, n_test_samples, hidden_dim])
+            test_hidden_array = np.array(test_hidden_states)
+            test_group.create_dataset('hidden_states', data=test_hidden_array)
+
+            # Save test inputs and targets
+            test_group.create_dataset('x_test', data=x_test.numpy())
+            test_group.create_dataset('y_test', data=y_test.numpy())
+
+            # Save train inputs and targets
+            training_group.create_dataset('x_train', data=x_train.numpy())
+            training_group.create_dataset('y_train', data=y_train.numpy())
+
+            # Save metadata
+            metadata_group.attrs['epochs'] = epochs
+            metadata_group.attrs['n_train_samples'] = len(x_train)
+            metadata_group.attrs['n_test_samples'] = len(x_test)
+            metadata_group.attrs['hidden_dim'] = test_hidden_array.shape[2]
+            metadata_group.attrs['final_train_loss'] = train_loss_history[-1]
+            metadata_group.attrs['final_test_loss'] = test_loss_history[-1]
+            metadata_group.attrs['input_dim'] = x_train.shape[1]
+            metadata_group.attrs['ground_truth_func'] = ground_truth.__name__
+            metadata_group.attrs['gt_params'] = gt_params
+
+            # Save ground truth function info
+            metadata_group.attrs['ground_truth_func'] = 'topksubset'
+            metadata_group.attrs['ground_truth_k'] = 3
+            metadata_group.attrs['ground_truth_dim'] = 1
+
+        print(f"\nTraining data saved to '{filename}'")
+
+    """HELPER FUNCTIONS"""
+    def _set_environment(self, *, dtype=torch.float32, seed: Optional[int] = None):
+        """
+        Set random seeds and device for reproducibility and performance.
+        Args:
+            dtype: Data type to use for model parameters and computations.
+            seed: Optional random seed for reproducibility. If None, a random seed will be generated.
+        """
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.seed = seed if seed is not None else np.random.randint(2 ** 32 - 1)
+        torch.manual_seed(self.seed)
+        torch.cuda.manual_seed_all(self.seed)
+        self.dtype = dtype
+
+    def reset(self):
+        self._set_environment(seed=self.seed, dtype=self.dtype)
+        self.data = {}
+
 
 # Display summary
 print("\n" + "="*60)
@@ -156,11 +214,10 @@ print(f"      ├── hidden_dim: {test_hidden_array.shape[2]}")
 print(f"      ├── input_dim: {x_train.shape[1]}")
 print(f"      ├── final_train_loss: {train_loss_history[-1]:.6f}")
 print(f"      ├── final_test_loss: {test_loss_history[-1]:.6f}")
-print(f"      ├── ground_truth_func: topksubset")
-print(f"      ├── ground_truth_k: 3")
-print(f"      ├── ground_truth_dim: 1")
+print(f"      ├── ground_truth_func: {ground_truth.__name__}, params: {gt_params}")
 print(f"      └── captured_epochs (shape: {np.array(captured_epochs).shape})")
 print("="*60)
 print(f"\nAdditional files saved:")
 print(f"  - {model_filename} (model weights)")
-print(f"  - {gt_config_filename} (ground truth function config)")
+
+# if __name__=="__main__":
