@@ -7,9 +7,7 @@ Reads from training_data.h5 and generates:
 import warnings
 from typing import Tuple, Optional
 
-import math
 import numpy as np
-import torch
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from scipy.linalg import orthogonal_procrustes
@@ -49,8 +47,7 @@ class Visualizer:
         Create animation showing 1D functional convergence along a parameterized line.
 
         Args:
-            line: ParameterizedCurve object. If None, defaults to varying the first input dimension.
-            t_range: (t_min, t_max) parameter x_range. If None, defaults to logs x_range on first axis.
+            axis: axis along which to slice
             output_path: where to save the GIF
             x_test: (n_samples, input_dim) test inputs for determining line and ground truth
             y_test: (n_samples,) ground truth outputs for the test inputs
@@ -59,8 +56,19 @@ class Visualizer:
         Returns:
             FuncAnimation object for the 1D convergence animation
         """
-        x_1d, y_1d, preds_1d, _, _ = self._extract_1d_slice(axis=axis, x_test=x_test, y_test=y_test, f_test=f_test)
-        epochs = int(self.metadata.get('epochs', preds_1d.shape[0]))
+        if x_test is None:
+            x_test = self.logs['x_test']
+        if y_test is None:
+            y_test = self.logs['y_test']
+        if f_test is None:
+            f_test = self.logs['f_test']
+
+        condition = np.all(np.delete(x_test, axis, axis=-1) == 0, axis=1) # (N,)
+        filter_indices = np.where(condition)[0]
+        x_1d, y_1d, f_1d = x_test[filter_indices, axis], y_test[filter_indices], f_test[:, filter_indices]
+        sort_indices = np.argsort(x_1d)
+        x_1d, y_1d, f_1d = x_1d[sort_indices], y_1d[sort_indices], f_1d[:, sort_indices]
+        epochs = int(self.metadata.get('epochs', f_1d.shape[0]))
 
         # Create animation using the extracted 1D logs
         fig, ax = plt.subplots(figsize=(12, 7))
@@ -75,14 +83,14 @@ class Visualizer:
 
         # Set axis limits
         x_margin = (x_1d.max() - x_1d.min()) * 0.05
-        y_min, y_max = float(min(y_1d.min(), preds_1d.min())), float(max(y_1d.max(), preds_1d.max()))
+        y_min, y_max = float(min(y_1d.min(), f_1d.min())), float(max(y_1d.max(), f_1d.max()))
         y_margin = (y_max - y_min) * 0.1
 
         ax.set_xlim(x_1d.min() - x_margin, x_1d.max() + x_margin)
         ax.set_ylim(y_min - y_margin, y_max + y_margin)
-        ax.set_xlabel(r'$t$, fontsize=12')
+        ax.set_xlabel(f'$x_{axis}$', fontsize=12)
         ax.set_ylabel('Output', fontsize=12)
-        ax.set_title('Functional Convergence along Parameterized Line', fontsize=14)
+        ax.set_title(f'Functional Convergence along x_{axis} axis', fontsize=14)
         ax.grid(True, linestyle='--', alpha=0.4)
         ax.legend(fontsize=11, loc='upper right')
 
@@ -92,7 +100,7 @@ class Visualizer:
             return line_anim, epoch_text
 
         def update(frame_idx):
-            line_anim.set_data(x_1d, preds_1d[frame_idx])
+            line_anim.set_data(x_1d, f_1d[frame_idx])
             epoch_text.set_text(f'Epoch: {frame_idx}')
             return line_anim, epoch_text
 
@@ -263,74 +271,6 @@ class Visualizer:
         return anim
 
 
-    def _extract_1d_slice(self,
-                          axis=0,
-                          other_idx=None,
-                          hidden_states: Optional[np.ndarray]=None,
-                          x_test: Optional[np.ndarray]=None,
-                          y_test: Optional[np.ndarray]=None,
-                          f_test: Optional[np.ndarray]=None,
-                          *,
-                          tolerance: Optional[float]=0.01,
-                          p_norm: str | float | int=np.inf,
-                          **kwargs):
-        """
-        Extract a 1D slice of the logs along the specified axis.
-        
-        Args:
-            x_test: (n_samples, input_dim) - test inputs
-            y_test: (n_samples, 1) - ground truth
-            f_test: (epochs, n_samples, 1) - model f_test
-            hidden_states: (epochs, n_samples, hidden_dim) - hidden states
-            axis: which axis to vary (default: 0 for x_1)
-            other_idx: sample index to use for other dimensions (if None, use mean)
-            tolerance: tolerance for selecting samples along other dimensions
-            p_norm: norm to use for plotting
-        
-        Returns:
-            Sorted arrays for 1D visualization
-        """
-        if x_test is None:
-            x_test = self.logs['x_test']
-        if y_test is None:
-            y_test = self.logs['y_test']
-        if f_test is None:
-            f_test = self.logs['f_test']
-        if hidden_states is None:
-            hidden_states = self.logs['hidden_states']
-        n_samples = x_test.shape[0]
-        
-        # Find samples that vary along the specified axis
-        # Use a slice where other dimensions are approximately constant
-        if other_idx is None:
-            # Create a slice by selecting samples near the median of other dimensions
-            proj_x_test = x_test.copy()
-            proj_x_test[..., axis] = 0
-            eps = tolerance * np.linalg.norm(np.var(proj_x_test, axis=0), ord=p_norm)
-            if p_norm in ['inf', 'infty']:
-                p_norm = np.inf
-            condition = np.linalg.norm(x=x_test, ord=p_norm, axis=-1) < eps
-            indices = np.where(condition)[0]
-        else:
-            indices = np.arange(n_samples)
-        
-        if len(indices) < 2:
-            print(f"Warning: Only {len(indices)} samples found for 1D slice")
-            # Fallback: just take all samples and sort by axis
-            indices = np.arange(n_samples)
-        
-        # Sort by the specified axis
-        sort_idx = np.argsort(x_test[indices, axis])
-        indices = indices[sort_idx]
-        
-        x_1d = x_test[indices, axis]
-        y_1d = y_test[indices]
-        preds_1d = f_test[:, indices]  # [E, n_selected_samples]
-        hidden_1d = hidden_states[:, indices, :]  # [E, n_selected_samples, hidden_dim]
-        
-        return x_1d, y_1d, preds_1d, hidden_1d, indices
-
-
     def plot_loss_history(self, 
                           output_path: Optional[str] = None,
                           *,
@@ -369,7 +309,7 @@ class Visualizer:
 
 
     def print_summary(self):
-        """Print training summary from logged logs."""
+        """Print training summary from logs."""
         preds_shape = np.array(self.logs['f_test']).shape
         hidden_shape = np.array(self.logs['hidden_states']).shape
     
