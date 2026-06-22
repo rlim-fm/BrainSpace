@@ -18,11 +18,11 @@ This module provides tools for:
 - **Loss History**: Training and test loss curves
 ![MLP_top3sum_loss_history.png](visualization_samples/MLP_top3sum_loss_history.png)
 - **1D Convergence**: Animated function convergence along a single input axis
-<video src="visualization_samples/MLP_top3sum_1d_convergence.mp4" controls></video>
+![MLP_top3sum_1d_convergence.mp4](visualization_samples/MLP_top3sum_1d_convergence.mp4)
 - **3D PCA Convergence**: Hidden states evolution in PCA space (anchor mode)
-<video src="visualization_samples/MLP_top3sum_pca_3d_anchor.mp4" controls></video>
+![MLP_top3sum_pca_3d_anchor.mp4](visualization_samples/MLP_top3sum_pca_3d_anchor.mp4)
 - **3D PCA Procrustes**: Hidden states evolution with per-epoch PCA alignment
-<video src="visualization_samples/MLP_top3sum_pca_3d_procrustes.mp4" controls></video>
+![MLP_top3sum_pca_3d_procrustes.mp4](visualization_samples/MLP_top3sum_pca_3d_procrustes.mp4)
 - **Function Space Convergence**: Visualize the convergence of the network in the function space as a 3D projection
 ![MLP_top3sum_function_space.png](visualization_samples/MLP_top3sum_function_space.png)
 ## Quick Start (30 seconds)
@@ -167,14 +167,6 @@ class MyViz(Visualization):
 visualizer.register(MyViz())
 ```
 
-## Performance
-
-| Approach | Memory | File Size |
-|----------|--------|-----------|
-| Traditional (all data) | 2.7 GB | 1-2 GB |
-| Streaming (registered) | 100 MB | 50-500 MB |
-| **Savings** | **27x** | **3-20x** |
-
 ## Output Files
 
 ```
@@ -207,14 +199,10 @@ visualizations/topk-sum/
 @software{lim2026brainspace,
   title={BrainSpace: A Python Package for Functional Convergence Analysis of Neural Networks},
   author={Lim, Richard},
-  year={2024}
+  year={2026}
 }
 ```
 
 ## License
 
 See LICENSE file.
-
-## Contributing
-
-Pull requests welcome! Please include tests and documentation updates.
