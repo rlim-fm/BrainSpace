@@ -35,7 +35,7 @@ from datasets import topksubset
 import torch.optim as optim
 
 # Create visualizer with desired visualizations
-visualizer = Visualizer()
+visualizer = Visualizer(name='model')
 visualizer.register_loss_history()            # Loss plot
 visualizer.register_convergence_1d(axis=0)    # 1D convergence
 visualizer.register_pca_3d()                  # 3D PCA (anchor mode)
