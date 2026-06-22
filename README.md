@@ -18,11 +18,11 @@ This module provides tools for:
 - **Loss History**: Training and test loss curves
 ![MLP_top3sum_loss_history.png](visualization_samples/MLP_top3sum_loss_history.png)
 - **1D Convergence**: Animated function convergence along a single input axis
-[MLP_top3sum_1d_convergence.mp4](visualization_samples/MLP_top3sum_1d_convergence.mp4)
+<video src="visualization_samples/MLP_top3sum_1d_convergence.mp4" controls></video>
 - **3D PCA Convergence**: Hidden states evolution in PCA space (anchor mode)
-[MLP_top3sum_pca_3d_anchor.mp4](visualization_samples/MLP_top3sum_pca_3d_anchor.mp4)
+<video src="visualization_samples/MLP_top3sum_pca_3d_anchor.mp4" controls></video>
 - **3D PCA Procrustes**: Hidden states evolution with per-epoch PCA alignment
-[MLP_top3sum_pca_3d_procrustes.mp4](visualization_samples/MLP_top3sum_pca_3d_procrustes.mp4)
+<video src="visualization_samples/MLP_top3sum_pca_3d_procrustes.mp4" controls></video>
 - **Function Space Convergence**: Visualize the convergence of the network in the function space as a 3D projection
 ![MLP_top3sum_function_space.png](visualization_samples/MLP_top3sum_function_space.png)
 ## Quick Start (30 seconds)
