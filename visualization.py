@@ -1,11 +1,12 @@
 """
-Visualization script for analyzing functional convergence during training.
-Reads from training_data.h5 and generates:
-1. 1D functional convergence along x_1 axis
-2. 3D PCA visualization of hidden state evolution
+Simplified Visualization System
+Visualizer takes processor as parameter and dynamically extracts data needed.
+Each visualization is simple: just implement update() and finalize() methods.
 """
+import traceback
 import warnings
-from typing import Tuple, Optional
+from typing import Optional, Dict, Any, List
+from abc import ABC, abstractmethod
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,291 +16,62 @@ from sklearn.decomposition import PCA
 import h5py
 import os
 
-from tqdm import trange
-from util import ParameterizedCurve
+# ============================================================================
+# Base Visualization Class - Users inherit from this
+# ============================================================================
 
-class Visualizer:
-    def __init__(self, logs=None, metadata=None):
-        self.logs = logs or {}
-        self.metadata = metadata or {}
+class Visualization(ABC):
+    """Base class for all visualizations. Users implement update() and finalize()."""
 
-    def load_training_data(self, h5_filename='train_out/training_data.h5'):
-        """Load all training logs from HDF5 file."""
-        with h5py.File(h5_filename, 'r') as hf:
-            # Load logs
-            self.logs = {key: hf['logs'][key][()] for key in hf['logs'].keys()}
+    def __init__(self, name: str, sampling: int = 1):
+        self.name = name
+        self.sampling = sampling
+        self.frames = []
 
-            # Load metadata
-            self.metadata = {key: hf['metadata'][key][()] for key in hf['metadata'].keys()}
-
-    @staticmethod
-    def from_processor_data(proc):
-        return Visualizer(logs=proc.logs, metadata=proc.metadata)
-
-    def convergence_visualization_1d(self,
-                                     axis=0,
-                                     output_path: Optional[str] = None,
-                                     *,
-                                     x_test: Optional[np.ndarray] = None,
-                                     y_test: Optional[np.ndarray] = None,
-                                     f_test: Optional[np.ndarray] = None):
+    @abstractmethod
+    def update(self, processor, epoch: int):
         """
-        Create animation showing 1D functional convergence along a parameterized line.
+        Called each epoch to append frame data.
+        Users extract whatever they need from processor.
 
         Args:
-            axis: axis along which to slice
-            output_path: where to save the GIF
-            x_test: (n_samples, input_dim) test inputs for determining line and ground truth
-            y_test: (n_samples,) ground truth outputs for the test inputs
-            f_test: (epochs, n_samples) model predictions over epochs for the test inputs
-
-        Returns:
-            FuncAnimation object for the 1D convergence animation
+            processor: Processor instance with access to logs, metadata, model
+            epoch: current epoch number
         """
-        if x_test is None:
-            x_test = self.logs['x_test']
-        if y_test is None:
-            y_test = self.logs['y_test']
-        if f_test is None:
-            f_test = self.logs['f_test']
+        pass
 
-        condition = np.all(np.delete(x_test, axis, axis=-1) == 0, axis=1) # (N,)
-        filter_indices = np.where(condition)[0]
-        x_1d, y_1d, f_1d = x_test[filter_indices, axis], y_test[filter_indices], f_test[:, filter_indices]
-        sort_indices = np.argsort(x_1d)
-        x_1d, y_1d, f_1d = x_1d[sort_indices], y_1d[sort_indices], f_1d[:, sort_indices]
-        epochs = int(self.metadata.get('epochs', f_1d.shape[0]))
-
-        # Create animation using the extracted 1D logs
-        fig, ax = plt.subplots(figsize=(12, 7))
-
-        # Plot ground truth analytical line
-        ax.plot(x_1d, y_1d, 'k--', linewidth=3, label='Ground Truth', zorder=2)
-
-        # Initialize prediction line
-        line_anim, = ax.plot([], [], 'b-', linewidth=2, label='Network Prediction', zorder=1)
-        epoch_text = ax.text(0.05, 0.95, '', transform=ax.transAxes, fontsize=12,
-                            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-
-        # Training domain shading
-        x_min, x_max = self.metadata.get('x_range')
-        ax.axvspan(xmin=x_min, xmax=x_max, color='blue', alpha=0.1, label='Training domain')
-
-        # Set axis limits
-        x_margin = (x_1d.max() - x_1d.min()) * 0.05
-        y_min, y_max = float(min(y_1d.min(), f_1d.min())), float(max(y_1d.max(), f_1d.max()))
-        y_margin = (y_max - y_min) * 0.1
-
-        ax.set_xlim(x_1d.min() - x_margin, x_1d.max() + x_margin)
-        ax.set_ylim(y_min - y_margin, y_max + y_margin)
-        ax.set_xlabel(f'$x_{axis}$', fontsize=12)
-        ax.set_ylabel('Output', fontsize=12)
-        ax.set_title(f'Functional Convergence along x_{axis} axis', fontsize=14)
-        ax.grid(True, linestyle='--', alpha=0.4)
-        ax.legend(fontsize=11, loc='upper right')
-
-        def init():
-            line_anim.set_data([], [])
-            epoch_text.set_text('')
-            return line_anim, epoch_text
-
-        def update(frame_idx):
-            line_anim.set_data(x_1d, f_1d[frame_idx])
-            epoch_text.set_text(f'Epoch: {frame_idx}')
-            return line_anim, epoch_text
-
-        anim = FuncAnimation(fig, update, frames=epochs, init_func=init,
-                            blit=True, interval=50)
-        if output_path is not None:
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            anim.save(output_path, writer='pillow', fps=15)
-            print(f"✓ 1D convergence animation saved to '{output_path}'")
-        return fig, anim
-
-    def hidden_layer_visualization(self,
-                                   pca_epoch: int | str=-1,
-                                   output_path='visualizations/hidden_layer_pca.gif', 
-                                   *,
-                                   y_test: Optional[np.ndarray] = None,
-                                   f_test: Optional[np.ndarray] = None,
-                                   hidden_states: Optional[np.ndarray] = None):
+    @abstractmethod
+    def finalize(self, output_dir: str, prefix: str):
         """
-        Create 3D animation showing convergence in PCA space of hidden states.
-
-        Supports two modes:
-        1. Numeric (default): Fit PCA on anchor epoch, create static manifold for y_test
-        2. 'all' mode: Fit PCA on each epoch individually with Procrustes alignment
-
-        Projects hidden states onto 2D PCA, with output as z-axis.
+        Called after training to create output files (animations, plots, etc).
 
         Args:
-            y_test: ground truth outputs [N, 1]
-            f_test: f_test over epochs [E, N, 1]
-            hidden_states: hidden states over epochs [E, N, hidden_dim]
-            pca_epoch: anchor epoch for PCA fitting. If numeric (default -1), use single fixed PCA.
-                      If 'all', fit PCA per epoch with Procrustes alignment for smoothness.
-            output_path: where to save the GIF
-
-        Returns:
-            FuncAnimation object for the PCA 3D convergence animation
+            output_dir: where to save output
+            prefix: filename prefix
         """
-        if y_test is None:
-            y_test = self.logs['y_test']
-        if f_test is None:
-            f_test = self.logs['f_test']
-        if hidden_states is None:
-            hidden_states = self.logs['hidden_states']
-        
-        assert f_test.shape[
-                   1:] == y_test.shape, f"preds shape {f_test.shape}[1:] must match y_test shape {y_test.shape} on dimensions"
-        epochs = hidden_states.shape[0]
-        n_samples = hidden_states.shape[1]
-        y_flat = y_test.flatten()
-
-        print(
-            f"Creating PCA 3D animation in mode: {'all (Procrustes-aligned)' if pca_epoch == 'all' else f'anchor epoch={pca_epoch}'}")
-
-        if pca_epoch == "all":
-            # Mode 2: Fit PCA on each epoch with Procrustes alignment
-            pca_list = []
-            hidden_2d_list = []
-
-            # Fit PCA for each epoch
-            for epoch_idx in range(epochs):
-                pca = PCA(n_components=2)
-                pca.fit(hidden_states[epoch_idx, :, :])
-                hidden_2d = pca.transform(hidden_states[epoch_idx, :, :])  # [N, 2]
-                pca_list.append(pca)
-                hidden_2d_list.append(hidden_2d)
-
-            # Apply Procrustes alignment for smoothness
-            for epoch_idx in range(1, epochs):
-                # Align current epoch to previous epoch
-                R, _ = orthogonal_procrustes(hidden_2d_list[epoch_idx], hidden_2d_list[epoch_idx - 1])
-                hidden_2d_list[epoch_idx] @= R
-
-            # Extract PC coordinates for all epochs
-            pc1_all_frames = np.array([h[:, 0] for h in hidden_2d_list])  # [E, N]
-            pc2_all_frames = np.array([h[:, 1] for h in hidden_2d_list])  # [E, N]
-
-            # Initial manifold: use PCA from first epoch for z-axis reference
-            pca_ref = pca_list[0]
-            print(f"PCA explained variance ratio (epoch 1): {pca_ref.explained_variance_ratio_}")
-
-            # Anchor points for manifold surface
-            pc1_anchor = pc1_all_frames[0]
-            pc2_anchor = pc2_all_frames[0]
-
-        else:
-            # Mode 1 (default): Single fixed PCA on anchor epoch
-            pca = PCA(n_components=2)
-            pca.fit(hidden_states[pca_epoch, :, :])
-            print(f"PCA explained variance ratio (anchor epoch {pca_epoch}): {pca.explained_variance_ratio_}")
-
-            # Transform all epochs using single PCA basis
-            pc1_all_frames = np.array(
-                [pca.transform(hidden_states[epoch_idx, :, :])[:, 0] for epoch_idx in range(epochs)])
-            pc2_all_frames = np.array(
-                [pca.transform(hidden_states[epoch_idx, :, :])[:, 1] for epoch_idx in range(epochs)])
-
-            # Use anchor epoch for static manifold
-            hidden_anchor_2d = pca.transform(hidden_states[pca_epoch, :, :])
-            pc1_anchor = hidden_anchor_2d[:, 0]
-            pc2_anchor = hidden_anchor_2d[:, 1]
-
-        # ===== Create 3D visualization =====
-        fig = plt.figure(figsize=(12, 9))
-        ax = fig.add_subplot(111, projection='3d')
-        surf_plot = ax.plot_trisurf(pc1_anchor, pc2_anchor, y_flat, cmap='viridis', alpha=0.3,
-                                    label='Ground Truth Surface')
-
-        # Initialize scatter plot for predictions
-        scatter = ax.scatter([], [], [], c='black', alpha=0.8, s=30, label='Network Predictions')
-        epoch_text = ax.text2D(0.05, 0.95, '', transform=ax.transAxes, fontsize=12,
-                               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-
-        # Compute global ranges for consistent axis limits
-        pc1_all = pc1_all_frames.flatten()
-        pc2_all = pc2_all_frames.flatten()
-        f_flat = f_test.flatten()
-
-        margin_pc1 = (pc1_all.max() - pc1_all.min()) * 0.1
-        margin_pc2 = (pc2_all.max() - pc2_all.min()) * 0.1
-        z_min, z_max = min(float(y_flat.min()), float(f_flat.min())), max(float(y_flat.max()), float(f_flat.max()))
-        margin_out = (z_max - z_min) * 0.1
-        x_lim = pc1_all.min() - margin_pc1, pc1_all.max() + margin_pc1
-        y_lim = pc2_all.min() - margin_pc2, pc2_all.max() + margin_pc2
-        z_lim = z_min - margin_out, z_max + margin_out
-
-        def set_static():
-            ax.set_xlim(x_lim)
-            ax.set_ylim(y_lim)
-            ax.set_zlim(z_lim)
-
-            ax.set_xlabel('PC1', fontsize=11)
-            ax.set_ylabel('PC2', fontsize=11)
-            ax.set_zlabel('Output', fontsize=11)
-            mode_str = "All Epochs (Procrustes)" if pca_epoch == "all" else f"Anchor Epoch {pca_epoch}"
-            ax.set_title(f'Hidden State Evolution in PCA Space [{mode_str}]', fontsize=14)
-            ax.legend(fontsize=10, loc='upper right')
-            ax.view_init(elev=20, azim=45)
-
-        set_static()
-
-        def init():
-            scatter._offsets3d = ([], [], [])
-            epoch_text.set_text('')
-            return scatter, epoch_text
-
-        def update(frame_idx):
-            # Get f_test and PCA coordinates for this epoch
-            pc1_frame = pc1_all_frames[frame_idx]
-            pc2_frame = pc2_all_frames[frame_idx]
-            if pca_epoch == "all":
-                nonlocal surf_plot
-                surf_plot.remove()
-                surf_plot = ax.plot_trisurf(pc1_frame, pc2_frame, y_flat, cmap='viridis', alpha=0.3,
-                                            label='Ground Truth Surface')
-                set_static()
-            output = f_test[frame_idx].flatten()
-            scatter._offsets3d = (pc1_frame, pc2_frame, output)
-            epoch_text.set_text(f'Epoch: {frame_idx}')
-            return scatter, epoch_text
-
-        anim = FuncAnimation(fig, update, frames=epochs, init_func=init,
-                             blit=True, interval=50)
-
-        if output_path is not None:
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            anim.save(output_path, writer='pillow', fps=15)
-        print(f"✓ PCA 3D animation saved to '{output_path}'")
-        return fig, anim
+        pass
 
 
-    def plot_loss_history(self, 
-                          output_path: Optional[str] = None,
-                          *,
-                          train_loss: Optional[np.ndarray] = None,
-                          test_loss: Optional[np.ndarray] = None) -> plt.figure:
-        """
-        Plot the training and test loss of the model.
+class LossHistoryPlot(Visualization):
+    """Plot training and test loss."""
 
-        Args:
-            output_path: the path to save the plot
-            train_loss: train loss (E,)
-            test_loss: test loss (E,)
+    def __init__(self):
+        super().__init__('loss_history')
+        self.train_losses = []
+        self.test_losses = []
 
-        Returns:
-            fig: matplotlib figure
-        """
-        if train_loss is None:
-            train_loss = self.logs['train_loss']
-        if test_loss is None:
-            test_loss = self.logs['test_loss']
-        fig = plt.figure(figsize=(10, 6))
-        ax = fig.add_subplot(111)
-        ax.plot(train_loss, linewidth=2, label='Train Loss', alpha=0.8)
-        ax.plot(test_loss, linewidth=2, label='Test Loss', alpha=0.8)
+    def update(self, processor, epoch: int):
+        """Extract loss values from processor."""
+        if processor.logs['train_loss']:
+            self.train_losses.append(processor.logs['train_loss'][-1])
+        if processor.logs['test_loss']:
+            self.test_losses.append(processor.logs['test_loss'][-1])
+
+    def finalize(self, output_dir: str, prefix: str):
+        """Create loss plot."""
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(self.train_losses, linewidth=2, label='Train Loss', alpha=0.8)
+        ax.plot(self.test_losses, linewidth=2, label='Test Loss', alpha=0.8)
         ax.set_title('Training Loss History', fontsize=14)
         ax.set_xlabel('Epoch', fontsize=12)
         ax.set_ylabel('MSE Loss', fontsize=12)
@@ -307,98 +79,376 @@ class Visualizer:
         ax.grid(True, linestyle='--', alpha=0.6)
         ax.legend(fontsize=11)
         fig.tight_layout()
-        if output_path is not None:
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            plt.savefig(output_path, dpi=150)
-            print(f"✓ Loss history saved to '{output_path}'")
-        return fig
+
+        output_file = f'{output_dir}/{prefix}_loss_history.png'
+        os.makedirs(output_dir, exist_ok=True)
+        plt.savefig(output_file, dpi=150)
+        plt.close(fig)
+        print(f"✓ Loss history plot saved to '{output_file}'")
 
 
-    def print_summary(self):
-        """Print training summary from logs."""
-        preds_shape = np.array(self.logs['f_test']).shape
-        hidden_shape = np.array(self.logs['hidden_states']).shape
-    
-        print("\n" + "=" * 75)
-        print("TRAINING SUMMARY (from logs)")
-        print("=" * 75)
-        print(f"\n[Loss Statistics]")
-        print(f"  Final train loss: {self.logs['train_loss'][-1]:.6f}")
-        print(f"  Final test loss:  {self.logs['test_loss'][-1]:.6f}")
-        print(f"  Best train loss:  {np.min(self.logs['train_loss']):.6f} (epoch {np.argmin(self.logs['train_loss'])})")
-        print(f"  Best test loss:   {np.min(self.logs['test_loss']):.6f} (epoch {np.argmin(self.logs['test_loss'])})")
-        print(f"\n[HDF5 File Structure]")
-        print(f"  ├── logs/")
-        print(f"  │   ├── x_train: {self.logs['x_train'].shape}")
-        print(f"  │   ├── y_train: {self.logs['y_train'].shape}")
-        print(f"  │   ├── x_test: {self.logs['x_test'].shape}")
-        print(f"  │   ├── y_test: {self.logs['y_test'].shape}")
-        print(f"  │   ├── train_loss: {len(self.logs['train_loss'])} entries")
-        print(f"  │   ├── test_loss: {len(self.logs['test_loss'])} entries")
-        print(f"  │   ├── f_test: {preds_shape} entries")
-        print(f"  │   └── hidden_states: {hidden_shape} entries")
-        print(f"  └── metadata/")
-        print(f"      ├── x_range: {self.metadata['x_range']}")
-        print(f"      ├── data_dim: {self.metadata['data_dim']}")
-        print(f"      ├── N: {self.metadata['N']}")
-        print(f"      ├── ground_truth: {self.metadata['ground_truth']}")
-        print(f"      ├── model: {self.metadata['model']}")
-        print(f"      ├── optimizer: {self.metadata['optimizer']}")
-        print(f"      ├── criterion: {self.metadata['criterion']}")
-        print(f"      ├── scheduler: {self.metadata['scheduler']}")
-        print(f"      └── epochs: {self.metadata['epochs']}")
-        print("=" * 75 + "\n")
+class Convergence1D(Visualization):
+    """1D functional convergence animation."""
+
+    def __init__(self, axis: int = 0, sampling: int = 1):
+        super().__init__('convergence_1d', sampling)
+        self.axis = axis
+        self.f_test_frames = []
+
+    def update(self, processor, epoch: int):
+        """Extract f_test predictions."""
+        if processor.logs.get('f_test'):
+            f_test = processor.logs['f_test'][-1]  # Last appended frame
+            self.f_test_frames.append(f_test)
+
+    def finalize(self, output_dir: str, prefix: str):
+        """Create 1D convergence animation."""
+        processor_logs = getattr(self, '_processor_logs', {})
+        processor_metadata = getattr(self, '_processor_metadata', {})
+
+        x_test = processor_logs.get('x_test')
+        y_test = processor_logs.get('y_test')
+
+        if x_test is None or y_test is None:
+            print(f"⊘ Skipping {self.name}: missing reference data")
+            return
+
+        f_test = np.array(self.f_test_frames)
+        epochs = np.arange(0, len(f_test), self.sampling)
+
+        # Extract 1D slice
+        condition = np.all(np.delete(x_test, self.axis, axis=-1) == 0, axis=1)
+        filter_indices = np.where(condition)[0]
+
+        if len(filter_indices) == 0:
+            print(f"⊘ No 1D data found along axis {self.axis}")
+            return
+
+        x_1d = x_test[filter_indices, self.axis]
+        y_1d = y_test[filter_indices]
+        f_1d = f_test[:, filter_indices]
+
+        sort_indices = np.argsort(x_1d)
+        x_1d, y_1d = x_1d[sort_indices], y_1d[sort_indices]
+        f_1d = f_1d[np.ix_(epochs, sort_indices)]
+
+        # Create animation
+        fig, ax = plt.subplots(figsize=(12, 7))
+        ax.plot(x_1d, y_1d, 'k--', linewidth=3, label='Ground Truth', zorder=2)
+        line_anim, = ax.plot([], [], 'b-', linewidth=2, label='Network Prediction', zorder=1)
+        epoch_text = ax.text(0.05, 0.95, '', transform=ax.transAxes,
+                            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+        x_min, x_max = processor_metadata.get('x_range', (x_1d.min(), x_1d.max()))
+        ax.axvspan(xmin=x_min, xmax=x_max, color='blue', alpha=0.1, label='Training domain')
+
+        x_margin = (x_1d.max() - x_1d.min()) * 0.05
+        y_min, y_max = float(min(y_1d.min(), f_1d.min())), float(max(y_1d.max(), f_1d.max()))
+        y_margin = (y_max - y_min) * 0.1
+
+        ax.set_xlim(x_1d.min() - x_margin, x_1d.max() + x_margin)
+        ax.set_ylim(y_min - y_margin, y_max + y_margin)
+        ax.set_xlabel(f'$x_{self.axis}$', fontsize=12)
+        ax.set_ylabel('Output', fontsize=12)
+        ax.set_title(f'Functional Convergence along $x_{self.axis}$ axis', fontsize=14)
+        ax.grid(True, linestyle='--', alpha=0.4)
+        ax.legend(fontsize=11)
+
+        def init():
+            line_anim.set_data([], [])
+            epoch_text.set_text('')
+            return line_anim, epoch_text
+
+        def update_frame(frame_idx):
+            line_anim.set_data(x_1d, f_1d[frame_idx])
+            epoch_text.set_text(f'Epoch: {frame_idx * self.sampling}')
+            return line_anim, epoch_text
+
+        anim = FuncAnimation(fig, update_frame, frames=len(epochs), init_func=init,
+                            blit=True, interval=50)
+
+        output_file = f'{output_dir}/{prefix}_1d_convergence.mp4'
+        os.makedirs(output_dir, exist_ok=True)
+        anim.save(output_file, writer='ffmpeg', fps=15)
+        plt.close(fig)
+        print(f"✓ 1D convergence animation saved to '{output_file}'")
+
+
+class PCA3D(Visualization):
+    """3D PCA visualization of hidden states with domain coloring."""
+
+    def __init__(self, pca_epoch: int = -1, sampling: int = 1, mode: str = 'anchor'):
+        super().__init__(f'pca_3d_{mode}', sampling)
+        self.pca_epoch = pca_epoch
+        self.mode = mode  # 'anchor' or 'procrustes'
+        self.f_test_frames = []
+        self.hidden_frames = []
+
+    def update(self, processor, epoch: int):
+        """Extract f_test and hidden states."""
+        if processor.logs.get('f_test'):
+            self.f_test_frames.append(processor.logs['f_test'][-1])
+        if processor.logs.get('hidden_states'):
+            self.hidden_frames.append(processor.logs['hidden_states'][-1])
+
+    def finalize(self, output_dir: str, prefix: str):
+        """Create 3D PCA animation with in-domain/out-of-domain coloring."""
+        x_test = self._processor_logs.get('x_test')
+        y_test = self._processor_logs.get('y_test')
+        x_range = self._processor_metadata.get('x_range', (-8, 8))
+
+        if not self.f_test_frames or not self.hidden_frames:
+            print(f"⊘ No frames for {self.name}")
+            return
+
+        f_test = np.array(self.f_test_frames) # (E, N)
+        hidden_states = np.array(self.hidden_frames)
+        epochs = np.arange(0, len(f_test), self.sampling)
+
+        # Determine in-domain vs out-of-domain samples
+        if x_test is not None and x_range:
+            in_domain = np.all(
+                (x_test >= x_range[0]) & (x_test <= x_range[1]),
+                axis=1
+            )
+        else:
+            in_domain = np.ones(len(y_test), dtype=bool)
+
+        # PCA fitting
+        if self.mode == 'procrustes':
+            pca_list = []
+            hidden_2d_list = []
+            for epoch_idx in epochs:
+                pca = PCA(n_components=2)
+                pca.fit(hidden_states[epoch_idx])
+                hidden_2d = pca.transform(hidden_states[epoch_idx])
+                pca_list.append(pca)
+                hidden_2d_list.append(hidden_2d)
+
+            # Procrustes alignment
+            for epoch_idx in range(1, len(epochs)):
+                R, _ = orthogonal_procrustes(hidden_2d_list[epoch_idx], hidden_2d_list[epoch_idx - 1])
+                hidden_2d_list[epoch_idx] @= R
+
+            pc1_frames = np.array([h[:, 0] for h in hidden_2d_list])
+            pc2_frames = np.array([h[:, 1] for h in hidden_2d_list])
+            pc1_anchor = pc1_frames[0]
+            pc2_anchor = pc2_frames[0]
+        else:
+            pca = PCA(n_components=2)
+            pca.fit(hidden_states[self.pca_epoch])
+            pc1_frames = np.array([pca.transform(hidden_states[e])[:, 0] for e in range(len(self.f_test_frames))])
+            pc2_frames = np.array([pca.transform(hidden_states[e])[:, 1] for e in range(len(self.f_test_frames))])
+            hidden_2d_anchor = pca.transform(hidden_states[self.pca_epoch])
+            pc1_anchor = hidden_2d_anchor[:, 0]
+            pc2_anchor = hidden_2d_anchor[:, 1]
+
+        # Create 3D animation
+        from mpl_toolkits.mplot3d import Axes3D
+        fig = plt.figure(figsize=(12, 9))
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Plot surface with colors
+        colors = np.where(in_domain, 'blue', 'red')  # blue for in-domain, red for out
+        surf = ax.plot_trisurf(pc1_anchor, pc2_anchor, y_test, cmap='viridis', alpha=0.3)
+
+        scatter_in = ax.scatter([], [], [], c='blue', label='In-domain', s=30, alpha=0.8)
+        scatter_out = ax.scatter([], [], [], c='red', label='Out-of-domain', s=30, alpha=0.8)
+        epoch_text = ax.text2D(0.05, 0.95, '', fontsize=12)
+
+        def update_frame(frame_idx):
+            pc1 = pc1_frames[frame_idx]
+            pc2 = pc2_frames[frame_idx]
+            z = f_test[frame_idx]
+
+            scatter_in._offsets3d = (pc1[in_domain], pc2[in_domain], z[in_domain])
+            scatter_out._offsets3d = (pc1[~in_domain], pc2[~in_domain], z[~in_domain])
+            epoch_text.set_text(f'Epoch: {frame_idx * self.sampling}')
+            return scatter_in, scatter_out, epoch_text
+
+        # Set limits and labels
+        pc1_all = pc1_frames.flatten()
+        pc2_all = pc2_frames.flatten()
+        ax.set_xlim(pc1_all.min(), pc1_all.max())
+        ax.set_ylim(pc2_all.min(), pc2_all.max())
+        ax.set_zlim(min(f_test.min(), y_test.min()), max(f_test.max(), y_test.max()))
+        ax.set_xlabel('PC1')
+        ax.set_ylabel('PC2')
+        ax.set_zlabel('Output')
+        ax.legend(fontsize=10, loc='upper right')
+
+        anim = FuncAnimation(fig, update_frame, frames=len(epochs), interval=50)
+
+        output_file = f'{output_dir}/{prefix}_pca_3d_{self.mode}.mp4'
+        os.makedirs(output_dir, exist_ok=True)
+        anim.save(output_file, writer='ffmpeg', fps=15)
+        plt.close(fig)
+        print(f"✓ PCA 3D animation ({self.mode}) saved to '{output_file}'")
+
+
+class FunctionSpaceConvergence(Visualization):
+    """Convergence in PCA-projected function space."""
+
+    def __init__(self, sampling: int = 1):
+        super().__init__('function_space', sampling)
+        self.f_test_frames = []
+
+    def update(self, processor, epoch: int):
+        """Extract f_test predictions."""
+        if processor.logs.get('f_test'):
+            self.f_test_frames.append(processor.logs['f_test'][-1])
+
+    def finalize(self, output_dir: str, prefix: str):
+        """Create function space convergence plot."""
+        if not self.f_test_frames:
+            print(f"⊘ No frames for {self.name}")
+            return
+
+        f_test = np.array(self.f_test_frames)
+        y_test = self._processor_logs.get('y_test')
+
+        pca = PCA(n_components=3)
+        pca.fit(f_test)
+        f_3d = pca.transform(f_test)
+        y_3d = pca.transform(y_test[None, :])[0]
+
+        from mpl_toolkits.mplot3d import Axes3D
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+
+        epochs_range = np.arange(len(f_3d))
+        ax.scatter(f_3d[:, 0], f_3d[:, 1], f_3d[:, 2], c=epochs_range, cmap='viridis',
+                  s=30, label='Convergence path')
+        ax.scatter(y_3d[0], y_3d[1], y_3d[2], c='red', s=100, marker='*', label='Target')
+
+        ax.set_xlabel('PC1')
+        ax.set_ylabel('PC2')
+        ax.set_zlabel('PC3')
+        ax.set_title('Functional Convergence in PCA Space')
+        ax.legend()
+
+        output_file = f'{output_dir}/{prefix}_function_space.png'
+        os.makedirs(output_dir, exist_ok=True)
+        fig.tight_layout()
+        plt.savefig(output_file, dpi=150)
+        plt.close(fig)
+        print(f"✓ Function space plot saved to '{output_file}'")
+
+
+# ============================================================================
+# Main Visualizer Class
+# ============================================================================
+
+class Visualizer:
+    """
+    Simplified visualizer that works with processor directly.
+    Users just implement their own Visualization subclasses.
+    """
+
+    def __init__(self, sampling: int = 1):
+        self.sampling = sampling
+        self.visualizations: Dict[str, Visualization] = {}
+        self.processor = None
+
+    def register(self, visualization: Visualization):
+        """Register a visualization instance."""
+        self.visualizations[visualization.name] = visualization
+
+    def attach_processor(self, processor):
+        """Attach processor for dynamic data access."""
+        self.processor = processor
+
+    def update(self, epoch: int):
+        """Update all registered visualizations."""
+        if self.processor is None:
+            raise RuntimeError("Processor not attached. Call visualizer.attach_processor(processor)")
+
+        # Sample epochs
+        if epoch % self.sampling == 0:
+            for viz in self.visualizations.values():
+                viz.update(self.processor, epoch)
+
+    def finalize(self, output_dir: str = 'visualizations/topk-sum', prefix: str = 'model'):
+        """Finalize all visualizations."""
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Store processor data for access in finalize
+        for viz in self.visualizations.values():
+            if hasattr(self.processor, 'logs'):
+                viz._processor_logs = self.processor.logs
+            if hasattr(self.processor, 'metadata'):
+                viz._processor_metadata = self.processor.metadata
+
+        for viz_name, viz in self.visualizations.items():
+            print(f"Finalizing {viz_name}...")
+            try:
+                viz.finalize(output_dir, prefix)
+            except Exception as e:
+                print(f"✗ Error finalizing {viz_name}: {e}, traceback: {traceback.format_exc()}")
+
+    # ========================================================================
+    # Convenience registration methods
+    # ========================================================================
+
+    def register_loss_history(self):
+        """Register loss history plot."""
+        self.register(LossHistoryPlot())
+
+    def register_convergence_1d(self, axis: int = 0):
+        """Register 1D convergence visualization."""
+        self.register(Convergence1D(axis=axis, sampling=self.sampling))
+
+    def register_pca_3d(self, pca_epoch: int = -1):
+        """Register 3D PCA visualization (anchor mode)."""
+        self.register(PCA3D(pca_epoch=pca_epoch, sampling=self.sampling, mode='anchor'))
+
+    def register_pca_3d_procrustes(self):
+        """Register 3D PCA visualization (Procrustes mode)."""
+        self.register(PCA3D(pca_epoch='all', sampling=self.sampling, mode='procrustes'))
+
+
+    def load_training_data(self, h5_filename='train_out/training_data.h5'):
+        """Load training data from HDF5 file."""
+        self.logs = {}
+        self.metadata = {}
+        with h5py.File(h5_filename, 'r') as hf:
+            self.logs = {key: hf['logs'][key][()] for key in hf['logs'].keys()}
+            self.metadata = {key: hf['metadata'][key][()] for key in hf['metadata'].keys()}
 
     def visualize_full(self, name):
-        self.print_summary()
+        """Legacy method for loading and visualizing from file."""
+        self.load_training_data(f'train_out/{name}.h5')
+        # Register default visualizations
+        self.register_loss_history()
+        self.register_convergence_1d(axis=0)
+        self.register_pca_3d(pca_epoch=-1)
+        # Create mock processor for finalization
+        # This is for backward compatibility
 
-        # Create output directory if needed
-        os.makedirs('visualizations', exist_ok=True)
-        print("\nGenerating visualizations...")
-
-        # 1. Loss history plot
-        print("\nCreating loss history plot...")
-        self.plot_loss_history(
-            output_path=f'visualizations/topk-sum/{name}_loss_history.png'
-        )
-
-        # 2. 1D convergence with default axis-aligned line (along x_1)
-        print("\nCreating 1D convergence animation...")
-        self.convergence_visualization_1d(
-            axis=0,
-            output_path=f'visualizations/topk-sum/{name}_1d_convergence.gif'
-        )
-
-        # 3. PCA 3D visualization - Mode 1: Default (anchor epoch)
-        print("\nCreating PCA 3D visualization (anchor epoch mode)...")
-        self.hidden_layer_visualization(
-            pca_epoch=-1,
-            output_path=f'visualizations/topk-sum/{name}_pca_3d_convergence.gif'
-        )
-
-        # 3b. PCA 3D visualization - Mode 2: All epochs with Procrustes alignment
-        print("\nCreating PCA 3D visualization (all epochs + Procrustes mode)...")
-        self.hidden_layer_visualization(
-            pca_epoch='all',
-            output_path=f'visualizations/topk-sum/{name}_pca_3d_convergence_procrustes.gif'
-        )
-
-        print("\n" + "="*70)
-        print("✓ All visualizations complete!")
-        print("Output files:")
-        print(f"  - Loss history: visualizations/topk-sum/{name}_loss_history.png")
-        print(f"  - 1D convergence: visualizations/topk-sum/{name}_1d_convergence.gif")
-        print(f"  - PCA 3D convergence (anchor epoch): visualizations/topk-sum/{name}_pca_3d_convergence.gif")
-        print(f"  - PCA 3D convergence (all epochs + Procrustes): visualizations/topk-sum/{name}_pca_3d_convergence_procrustes.gif")
-        print("="*70 + "\n")
 
 def main():
-    """Main visualization pipeline"""
-    train_filename = "MHA_training_data"
-    print("Loading training logs...")
-    visualizer = Visualizer()
-    visualizer.load_training_data(f'train_out/{train_filename}.h5')
-    visualizer.visualize_full(train_filename)
+    """Example: Using the new simplified system."""
+    from train import Processor
+    from models import MLP
+    from datasets import topksubset
+    import torch.optim as optim
+
+    # Create visualizer with desired visualizations
+    visualizer = Visualizer(sampling=10)
+    visualizer.register_loss_history()
+    visualizer.register_convergence_1d(axis=0)
+
+    # Create processor (doesn't need to know about visualization details)
+    processor = Processor(
+        model=MLP(input_dim=10),
+        epochs=100,
+        visualizer=visualizer
+    )
+
+    # visualizer is used during training
+    # After training, finalize outputs
+    visualizer.finalize()
+
 
 if __name__ == '__main__':
     main()

@@ -1,3 +1,7 @@
+import warnings
+from typing import Optional
+
+import h5py
 import numpy as np
 from scipy.stats import qmc
 import torch.optim as optim
@@ -6,7 +10,6 @@ from tqdm import trange
 
 from models import *
 from datasets import *
-from visualization import *
 
 class Processor:
     def __init__(self,
@@ -19,6 +22,7 @@ class Processor:
                  criterion=None,
                  optimizer=None,
                  scheduler=None,
+                 visualizer=None,
                  *,
                  seed: Optional[int] = None,
                  dtype=torch.float32):
@@ -33,6 +37,7 @@ class Processor:
             criterion: the loss function to use for training.
             optimizer: the optimizer to use for training.
             scheduler: the scheduler to use for training.
+            visualizer: optional Visualizer instance for streaming logging during training.
             seed (Optional[int]): random seed for reproducibility. If None, a random seed will be generated.
             dtype: logs type for model parameters and computations (default: torch.float32).
         """
@@ -42,6 +47,7 @@ class Processor:
         self.data_dim = data_dim
         self.d = math.prod(data_dim) # true dimensionality of the data
         self.N = N
+        self.visualizer = visualizer
 
         # Set defaults
         if ground_truth is None:
@@ -60,7 +66,7 @@ class Processor:
         lin = np.linspace(x_range[0], x_range[1], self.N // self.d) # (N // d,)
         x_axis = (np.eye(self.d)[None, ...] * lin[:, None, None]).reshape(-1, self.d) # (1, d, d) * (N // d, 1, 1) =  (N, d, d) -> reshape to (~N, d)
         x_axis = x_axis.reshape(-1, *self.data_dim) # (~N, *dims)
-        x_test = np.vstack((x_train, x_axis)) * 2 # (~2N, *dims)
+        x_test = np.vstack((x_train, x_axis, np.zeros((1, *self.data_dim)))) * 5 # (~2N + 1, *dims)
         self.x_test = torch.from_numpy(x_test).float().to(self.device)
         self.y_test = ground_truth(self.x_test).to(self.device).squeeze()
 
@@ -74,7 +80,7 @@ class Processor:
         self.scheduler = scheduler
         self.epochs = epochs
 
-        # Logging
+        # Logging setup
         self.logs = {
             "x_train": self.x_train.cpu().numpy().reshape(-1, self.d),
             "y_train": self.y_train.cpu().numpy().squeeze(),
@@ -96,6 +102,10 @@ class Processor:
             "scheduler": self.scheduler.__class__.__name__ if self.scheduler else None,
             "epochs": epochs,
         }
+
+        # Configure visualizer if provided
+        if visualizer is not None:
+            visualizer.attach_processor(self)
 
     @staticmethod
     def from_config(config: dict):
@@ -168,8 +178,18 @@ class Processor:
             out = out.squeeze()
             test_loss = self.criterion(out, self.y_test)
             self.logs['test_loss'].append(test_loss.item())
-            self.logs['f_test'].append(out.cpu().numpy())
-            self.logs['hidden_states'].append(hidden.cpu().numpy())
+
+            # Always log these (needed for saving)
+            f_test_np = out.cpu().numpy()
+            self.logs['f_test'].append(f_test_np)
+            hidden_np = hidden.cpu().numpy()
+            self.logs['hidden_states'].append(hidden_np)
+
+            # Update visualizer with current epoch
+            # Visualizer dynamically extracts what it needs from processor
+            if self.visualizer is not None:
+                current_epoch = len(self.logs['test_loss']) - 1
+                self.visualizer.update(current_epoch)
 
 
     def run(self):
@@ -186,11 +206,14 @@ class Processor:
         print(f"\nTraining complete!")
         print(f"Final losses: Train Loss: {self.logs['train_loss'][-1]:.6f}, Test Loss: {self.logs['test_loss'][-1]:.6f}")
 
-    def save(self, filename='train_out/training_data.h5', output_dir='train_out'):
-        to_save = {
-            'logs': self.logs,
-            'metadata': self.metadata,
-        }
+        # Finalize visualizations if visualizer is attached
+        if self.visualizer is not None:
+            self.visualizer.finalize()
+
+    def save(self, filename='train_out/training_data.h5', output_dir='train_out', *, metadata_only=False):
+        to_save = {'metadata': self.metadata}
+        if not metadata_only:
+            to_save['logs'] = self.logs
         def dict_to_h5(dic, h5_file, path='/'):
             """Recursively saves a dictionary to an HDF5 file."""
             for key, value in dic.items():
@@ -266,7 +289,9 @@ class Processor:
         print(f"      └── epochs: {self.metadata['epochs']}")
         print("="*75 + "\n")
 
-    """HELPER FUNCTIONS"""
+    # ============================================================================
+    # HELPER METHODS
+    # ============================================================================
     def _set_environment(self, *, dtype=torch.float32, seed: Optional[int] = None):
         """
         Set random seeds and device for reproducibility and performance.
@@ -293,25 +318,25 @@ class Processor:
 
 def main():
     """Main training script using OOP Processor."""
-    model = SimpleTransformerModel(input_dim=1, dropout=0.1)
-    optimizer = optim.AdamW(model.parameters(),lr=1e-4)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.5)
+    model = MLP(input_dim=10, dropout=0.1)
+    optimizer = optim.AdamW(model.parameters(),lr=1e-3)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=750, gamma=0.8)
     processor = Processor(
         x_range=(-8, 8),
-        data_dim=(10, 1),
+        data_dim=(10,),
         N=2048,
         ground_truth=topksubset(3, 1),
         model=model,
         optimizer=optimizer,
         scheduler=scheduler,
-        epochs=3000,
+        epochs=5000,
         criterion=nn.MSELoss(reduction='mean'),
         seed=42
     )
 
     processor.run()
     processor.print_summary()
-    processor.save('train_out/MHA_training_data.h5', output_dir='train_out')
+    processor.save('train_out/MLP_training_data.h5', output_dir='train_out')
 
 if __name__ == '__main__':
     main()

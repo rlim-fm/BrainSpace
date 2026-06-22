@@ -295,6 +295,7 @@ class TropicalAttention(nn.Module):
     def __init__(self, d_model, n_heads, device, use_logsumexp=False, 
                  use_tropical_metric=True):
         super(TropicalAttention, self).__init__()
+        self.device = device
         assert d_model % n_heads == 0, "d_model must be divisible by n_heads"
         self.d_k = d_model // n_heads
         self.n_heads = n_heads
@@ -500,24 +501,26 @@ class TropicalAttention_(nn.Module):
 
 class TransformerBlock(nn.Module):
     def __init__(
-        self,
-        d_model: int,
-        n_heads: int,
-        dim_ff: int = 128,
-        dropout: float = 0.0,
-        vanilla: bool = True,
-        tropical_attention=None,
-        pre_norm: bool = False,
-        aggregator: str = 'softmax'
+            self,
+            d_model: int,
+            n_heads: int,
+            dim_ff: int = 128,
+            dropout: float = 0.0,
+            vanilla: bool = True,
+            pre_norm: bool = False,
+            aggregator: str = 'softmax',
+            *,
+            device='cpu'
     ):
         super().__init__()
+        self.device = device
         self.pre_norm = pre_norm
         self.vanilla = vanilla
         # Attention layer
         if vanilla:
             self.attn = VanillaAttention(d_model, n_heads, aggregator=aggregator)
         else:
-            self.attn = tropical_attention
+            self.attn = TropicalAttention(d_model, n_heads, device=device, use_tropical_metric=True)
         # Feed-forward
         self.ff = nn.Sequential(
             nn.Linear(d_model, dim_ff),
@@ -560,17 +563,18 @@ class TransformerBlock(nn.Module):
 
 class TransformerEncoder(nn.Module):
     def __init__(
-        self,
-        d_model: int = 32,
-        n_heads: int = 2,
-        num_layers: int = 1,
-        dropout: float = 0.0,
-        tropical: bool = False,
-        tropical_attention_cls=None,
-        pre_norm: bool = False,
-        aggregator: str = 'softmax',
-    ):
+            self,
+            d_model: int = 32,
+            n_heads: int = 2,
+            num_layers: int = 1,
+            dropout: float = 0.0,
+            tropical: bool = False,
+            pre_norm: bool = False,
+            aggregator: str = 'softmax',
+            *,
+            device='cpu'):
         super().__init__()
+        self.device = device
         self.pre_norm = pre_norm
         self.layers = nn.ModuleList()
         for _ in range(num_layers):
@@ -580,9 +584,9 @@ class TransformerEncoder(nn.Module):
                 dim_ff=4*d_model,
                 dropout=dropout,
                 vanilla=not tropical,
-                tropical_attention=tropical_attention_cls,
                 pre_norm=pre_norm,
-                aggregator=aggregator
+                aggregator=aggregator,
+                device=device
             )
             self.layers.append(block)
 
@@ -597,26 +601,22 @@ class TransformerEncoder(nn.Module):
 
 class SimpleTransformerModel(Model):
     def __init__(
-        self,
-        input_dim: int = 1,
-        num_classes: int = 1,
-        d_model: int = 32,
-        n_heads: int = 2,
-        num_layers: int = 1,
-        dropout: float = 0.0,
-        tropical: bool = False,
-        tropical_attention_cls=None,
-        pool: bool = True,
-        pre_norm: bool = False,
-        aggregator: str = 'softmax',
-    ):
+                self,
+                input_dim: int = 1,
+                num_classes: int = 1,
+                d_model: int = 32,
+                n_heads: int = 2,
+                num_layers: int = 1,
+                dropout: float = 0.0,
+                tropical: bool = False,
+                pool: bool = True,
+                pre_norm: bool = False,
+                aggregator: str = 'softmax',
+                *,
+                device='cpu'):
         super().__init__()
+        self.device = device
         self.input_linear = nn.Linear(input_dim, d_model)
-
-        # Choose attention class
-        attn_cls = VanillaAttention
-        if tropical:
-            attn_cls = tropical_attention_cls
 
         self.encoder = TransformerEncoder(
             d_model=d_model,
@@ -624,9 +624,9 @@ class SimpleTransformerModel(Model):
             num_layers=num_layers,
             dropout=dropout,
             tropical=tropical,
-            tropical_attention_cls=attn_cls,
             pre_norm=pre_norm,
             aggregator=aggregator,
+            device=device
         )       
         self.pool = pool
         self.output_layer = nn.Linear(d_model, num_classes)

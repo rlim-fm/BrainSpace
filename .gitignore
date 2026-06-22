@@ -223,3 +223,6 @@ __marimo__/
 # output files and logs
 visualizations
 train_out
+
+# internal READMEs
+READMEs
