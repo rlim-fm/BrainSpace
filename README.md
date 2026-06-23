@@ -84,7 +84,7 @@ visualizer.register(MyCustomViz())
 
 ```bash
 git clone <repo>
-cd FuncConv-TropNN
+cd BrainSpace
 pip install -r requirements.txt
 ```
 
