@@ -341,5 +341,32 @@ def main():
     # Run the complete pipeline: train, visualize, and save results
     experiment.run_grid(visualize=True, save_visualizations=True)
 
+    def plot_grid_final_results(self, df, ivs, dvs):
+        """
+        Plot the final results of all experiments in the grid
+
+        Args:
+            df: Dataframe of final results
+            ivs: Independent variables (dict of variable name to list of values).
+            dvs: Dependent variables (list of metric names).
+
+        Returns:
+            None
+        """
+        for iv1, iv2 in itertools.permutations(ivs.keys(), 2):
+            for dv in dvs:
+                cvs = {k: v for k, v in ivs.items() if k != iv1 and k != iv2}
+                for cv_dict in dict_product(cvs):
+                    cols = list(cv_dict.keys())
+                    cv_vals = pd.Series(cv_dict)
+                    relevant_data = df[(df[cols] == cv_vals).all(axis=1)]
+                    sns.violinplot(data=relevant_data, x=iv1, y=dv, hue=iv2)
+                    title = f"{dv} vs {str_leaf(iv1)} and {str_leaf(iv2)}"
+                    plt.title(title)
+                    text = "\n".join(f"{str_leaf(k)}={v}" for k, v in cv_dict.items())
+                    plt.figtext(1.0, 0.01, text, wrap=True, horizontalalignment='right', fontsize=8)
+                    self.io.save_plot(plt, f"images/{str_leaf(iv1)} vs {str_leaf(iv2)}"
+                                           f"/{title} for {', '.join(f'{str_leaf(k)}={v}' for k, v in cv_dict.items())}.png")
+
 if __name__ == '__main__':
     main()

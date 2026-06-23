@@ -407,15 +407,15 @@ class Visualizer:
 
     def register_convergence_1d(self, axis: int = 0):
         """Register 1D convergence visualization."""
-        self.register(Convergence1D(axis=axis, sampling=self.sampling))
+        self.register(Convergence1D(axis=axis))
 
     def register_pca_3d(self, pca_epoch: int = -1):
         """Register 3D PCA visualization (anchor mode)."""
-        self.register(PCA3D(pca_epoch=pca_epoch, sampling=self.sampling, mode='anchor'))
+        self.register(PCA3D(pca_epoch=pca_epoch, mode='anchor'))
 
     def register_pca_3d_procrustes(self):
         """Register 3D PCA visualization (Procrustes mode)."""
-        self.register(PCA3D(pca_epoch='all', sampling=self.sampling, mode='procrustes'))
+        self.register(PCA3D(pca_epoch='all', mode='procrustes'))
 
 
     def load_training_data(self, h5_filename='train_out/training_data.h5'):

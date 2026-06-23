@@ -292,7 +292,7 @@ class TropicalLinear(nn.Module):
         return y
     
 class TropicalAttention(nn.Module):
-    def __init__(self, d_model, n_heads, device, use_logsumexp=False, 
+    def __init__(self, d_model, n_heads, device, use_logsumexp=True,
                  use_tropical_metric=True):
         super(TropicalAttention, self).__init__()
         self.device = device

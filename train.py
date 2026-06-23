@@ -25,7 +25,8 @@ class Processor:
                  visualizer=None,
                  *,
                  seed: Optional[int] = None,
-                 dtype=torch.float32):
+                 dtype=torch.float32,
+                 device=None):
         """
         Args:
             x_range: tuple specifying the range of input values (min, max).
@@ -41,7 +42,7 @@ class Processor:
             seed (Optional[int]): random seed for reproducibility. If None, a random seed will be generated.
             dtype: logs type for model parameters and computations (default: torch.float32).
         """
-        self._set_environment(seed=seed, dtype=dtype)
+        self._set_environment(seed=seed, dtype=dtype, device=torch.device(device))
 
         self.x_range = x_range
         self.data_dim = data_dim
@@ -292,14 +293,17 @@ class Processor:
     # ============================================================================
     # HELPER METHODS
     # ============================================================================
-    def _set_environment(self, *, dtype=torch.float32, seed: Optional[int] = None):
+    def _set_environment(self, *, dtype=torch.float32, seed: Optional[int] = None, device: Optional[torch.device] = None):
         """
         Set random seeds and device for reproducibility and performance.
         Args:
             dtype: Data type to use for model parameters and computations.
             seed: Optional random seed for reproducibility. If None, a random seed will be generated.
         """
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = device
         self.seed = seed if seed is not None else 42
         torch.manual_seed(self.seed)
         torch.cuda.manual_seed_all(self.seed)
