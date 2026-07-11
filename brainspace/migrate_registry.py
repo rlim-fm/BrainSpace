@@ -177,17 +177,17 @@ def rebuild_run_config(old_rc, field_renames):
     Old pickles restore raw __dict__ state, so renamed attrs keep their old
     names and newly-added fields are absent. This maps old attr names to new
     ones and lets current dataclass defaults fill anything missing."""
-    from .config import RunConfig, DatasetConfig, ModelConfig, TrainConfig
+    from .config import get_config_class
     subs = {}
-    for sub_name, cls in (('data', DatasetConfig), ('model', ModelConfig),
-                          ('train', TrainConfig)):
+    for sub_name in ('data', 'model', 'train'):
+        cls = get_config_class(sub_name)
         old_vars = dict(vars(getattr(old_rc, sub_name)))
         for scope, old, new in field_renames:
             if scope in (None, sub_name) and old in old_vars and new not in old_vars:
                 old_vars[new] = old_vars.pop(old)
         kwargs = {f.name: old_vars[f.name] for f in fields(cls) if f.name in old_vars}
         subs[sub_name] = cls(**kwargs)
-    return RunConfig(**subs)
+    return get_config_class('run')(**subs)
 
 
 # ----------------------------------------------------------------------------
