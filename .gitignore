@@ -9,3 +9,4 @@ train_out/
 *.egg-info/
 build/
 dist/
+.DS_Store
