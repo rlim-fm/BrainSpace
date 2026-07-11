@@ -299,6 +299,8 @@ class Processor:
             visualizer=visualizer,
             batch_size=tc.batch_size,
             epoch_hooks=tc.build_epoch_hooks(),
+            batch_sampler=tc.build_batch_sampler(dataset),
+            step_granularity=getattr(tc, 'step_granularity', 'epoch'),
             seed=tc.seed,
             dtype=tc.dtype,
             device=resolved_device,

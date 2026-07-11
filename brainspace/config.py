@@ -155,6 +155,16 @@ class TrainConfig:
         schedule) into the training loop."""
         return []
 
+    def build_batch_sampler(self, dataset):
+        """Optional training batch sampler for the Processor.
+
+        Return an iterable yielding index batches (LongTensor / sequence of
+        ints) or ``(indices, weights)`` pairs; return ``None`` (the default)
+        for the standard contiguous-slice gradient-accumulation path. Domain
+        subclasses override this to wire k-NN / cluster samplers built from
+        their own config fields."""
+        return None
+
 
 @dataclass
 class RunConfig:
