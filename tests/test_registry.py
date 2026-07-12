@@ -56,6 +56,51 @@ def test_format_config_value_dict_key_order_canonical():
     assert a == b
 
 
+# Golden identity of an all-defaults RunConfig. If this test fails, the
+# content-hash of EVERY stored config in EVERY domain store (Tropical-RNN,
+# ClusterGAR, ...) has changed: existing cfg_ folders and result rows no longer
+# match their recomputed ids. Either revert the change that broke it, or — if
+# the schema change is intentional — run migrate_registry.py (--dry-run first)
+# in each domain store and update the pinned values here.
+GOLDEN_DEFAULT_ID = 'cfg_7de1b062'
+GOLDEN_DEFAULT_IDENTITY = {
+    'data_N': 2048,
+    'data_data_dim': '(10, 1)',
+    'data_ground_truth': 'CumulativeSum()',
+    'data_min_seq_len': 5,
+    'data_use_padding': False,
+    'data_x_range': '(-8, 8)',
+    'model_arch': 'LSTM',
+    'model_arch_kwargs': '{}',
+    'model_causal': True,
+    'model_dropout': 0.0,
+    'model_hidden_dim': 64,
+    'model_num_layers': 2,
+    'model_output_dim': 1,
+    'model_pool': False,
+    'model_seq2seq': True,
+    'train_batch_size': None,
+    'train_cot': False,
+    'train_criterion': 'MSELoss()',
+    'train_dtype': 'torch.float32',
+    'train_epochs': 1000,
+    'train_lr': 0.001,
+    'train_optimizer_cls': 'AdamW',
+    'train_scheduler_cls': None,
+    'train_scheduler_kwargs': '{}',
+    'train_weight_decay': 0.0,
+}
+
+
+def test_golden_identity_of_default_config():
+    assert registry.config_identity(RunConfig()) == GOLDEN_DEFAULT_IDENTITY
+    assert registry.config_id_for(RunConfig()) == GOLDEN_DEFAULT_ID
+
+
+def test_golden_id_of_non_default_config():
+    assert registry.config_id_for(make_config()) == 'cfg_b5e31228'
+
+
 # ----------------------------------------------------------------------------
 # Lookup registration
 # ----------------------------------------------------------------------------
