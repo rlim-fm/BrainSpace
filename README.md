@@ -314,8 +314,21 @@ Day-to-day: edit the core inside a domain repo's `core/` submodule on a real bra
 (`cd core && git switch main`), commit + push here, then `git add core && git commit`
 in the domain repo to advance the pin. Other domain repos pick the update up
 explicitly with `git submodule update --remote core` + a pointer commit — nothing
-moves under them silently. Editable installs need no reinstall after pulls. Fresh
-clones need `git clone --recurse-submodules`.
+moves under them silently. Fresh clones need `git clone --recurse-submodules`.
+
+**Deploying to another machine (e.g. HPC)**: after every `git pull` in the domain
+repo, sync the submodule checkout to the new pin — the pointer moves with the pull,
+the checkout does not:
+
+```bash
+git pull
+git submodule update --init core   # check out the pinned core commit
+pip install -e ./core              # ONE TIME per environment (add --no-deps to
+                                   # leave cluster-provided torch/numpy alone)
+```
+
+Because the install is editable, subsequent pulls only need the
+`git submodule update --init core` step — no reinstall.
 
 **Hash-stability contract** (domain stores with accumulated results depend on it):
 never add fields to the core config dataclasses; keep field names, class names, and
