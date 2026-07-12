@@ -20,6 +20,7 @@ from datetime import datetime
 import numpy as np
 import torch
 from dataclasses import fields, replace
+from typing import Callable, List, Optional
 
 # Backwards-compatible alias (the canonical implementation lives in registry.py
 # because config formatting defines the content-hash config identity).
@@ -361,7 +362,8 @@ class Experiment:
         seed_mapping=None,
         global_seed=None,
         save_models=False,
-        ordinal_ivs=None
+        ordinal_ivs=None,
+        extra_visualizations: Optional[Callable[[], List]] = None,
     ):
         """
         Initialize an Experiment for grid search with multiple trials.
@@ -388,6 +390,14 @@ class Experiment:
                 Used by the post-run statistical analysis (summary.md) to decide between a
                 Spearman correlation (ordinal) or a Friedman/Nemenyi ranking (everything else,
                 treated as non-ordinal/categorical). Defaults to none being ordinal.
+            extra_visualizations: Optional zero-arg factory returning a fresh list of
+                Visualization instances to register (in addition to
+                Visualizer.register_defaults()) on every Visualizer this experiment
+                creates. Called once per Visualizer so each config/trial gets its own
+                instances (Visualization objects accumulate per-run state and must not
+                be shared). Lets domain packages opt batch-granular or other
+                domain-specific visualizations into grid runs without core knowing
+                about them.
         """
         self.base_config = base_config or {}
         self.ivs = ivs or {}
@@ -400,6 +410,7 @@ class Experiment:
         self.global_seed = global_seed
         self.save_models = save_models
         self.ordinal_ivs = list(ordinal_ivs or [])
+        self.extra_visualizations = extra_visualizations
         self._force = False
         self._store_cache = {}
         # Detached figure-render pool (set up per run in run_grid/extend); defaults
@@ -474,6 +485,16 @@ class Experiment:
                     return replace(config, **{sub_config_name: updated_sub})
             raise KeyError(f"IV '{key}' not found in any sub-config (data, model, train)")
 
+    def _register_extra_visualizations(self, viz):
+        """Register this experiment's extra_visualizations (if any) onto viz.
+
+        Calls the factory once per Visualizer so each config/trial gets its
+        own Visualization instances, matching register_defaults()'s pattern.
+        """
+        if self.extra_visualizations is not None:
+            for v in self.extra_visualizations():
+                viz.register(v)
+
     def _config_dir(self, config_idx, config):
         """Global content-addressed per-config output directory.
 
@@ -508,6 +529,7 @@ class Experiment:
                 viz = Visualizer(name=config_id, output_dir=config_dir,
                                  sampling=sampling, device=device)
                 viz.register_defaults()
+                self._register_extra_visualizations(viz)
                 if load_viz_state:
                     if viz.load_state():
                         print(f"  ↻ Loaded prior visualization state for {config_id}")
@@ -799,6 +821,7 @@ class Experiment:
                              sampling=getattr(self, '_viz_sampling', 5),
                              device=getattr(self, '_viz_device', 'cpu'))
             viz.register_defaults()
+            self._register_extra_visualizations(viz)
             # Drop visualizations with no saved state (finalizing them would only
             # produce empty/broken figures).
             missing = [v.name for v in viz.visualizations.values()
