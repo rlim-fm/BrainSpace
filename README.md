@@ -150,6 +150,11 @@ brainspace-refresh                                                # re-render st
 brainspace-migrate --rename-field train.old=new --dry-run         # schema migrations
 ```
 
+Because domain repos `pip install -e ./core`, these console scripts land on that
+environment's `PATH` — run them from the domain repo's own working directory
+(e.g. `~/Labs/Tropical-RNN`, `~/Labs/ClusterGAR`), against that repo's own
+`results/`. No need to `cd core/` or `python -m` inside the submodule.
+
 See `docs/EXPERIMENT_GUIDE.md` for the full store/extension/analysis workflow.
 
 ## Custom visualizations
