@@ -122,15 +122,17 @@ def _coerce_loaded_result(row):
 
 
 def write_results_csv(results, csv_file):
-    """Write result-entry dicts to a CSV, unioning keys across rows."""
+    """Atomically write result-entry dicts to a CSV, unioning keys across rows."""
     os.makedirs(os.path.dirname(csv_file) or '.', exist_ok=True)
-    with open(csv_file, 'w', newline='') as f:
+    tmp = csv_file + '.tmp'
+    with open(tmp, 'w', newline='') as f:
         # Union of all result keys (success rows lack 'error'; failed rows may
         # lack loss fields) — dict.fromkeys preserves insertion order.
         all_fields = list(dict.fromkeys(k for r in results for k in r.keys()))
         writer = csv.DictWriter(f, fieldnames=all_fields, extrasaction='ignore')
         writer.writeheader()
         writer.writerows(results)
+    os.replace(tmp, csv_file)
 
 
 def _best_config_key(results):
