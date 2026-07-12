@@ -10,3 +10,6 @@ train_out/
 build/
 dist/
 .DS_Store
+
+# local-only Claude Code guidance
+CLAUDE.md
